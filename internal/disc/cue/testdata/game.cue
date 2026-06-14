@@ -1,0 +1,19 @@
+REM GENRE Action
+REM DATE 1999
+CATALOG 1234567890123
+CDTEXTFILE "game.cdt"
+TITLE "Some Game"
+PERFORMER "Some Studio"
+FILE "game (Track 1).bin" BINARY
+  TRACK 01 MODE2/2352
+    FLAGS DCP 4CH
+    ISRC ABCDE1234567
+    PREGAP 00:02:00
+    INDEX 01 00:00:00
+FILE "game (Track 2).bin" BINARY
+  TRACK 02 AUDIO
+    TITLE "Track Two"
+    REM track two comment
+    INDEX 00 02:30:00
+    INDEX 01 02:32:00
+    POSTGAP 00:01:00
