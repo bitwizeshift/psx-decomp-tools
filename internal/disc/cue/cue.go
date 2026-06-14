@@ -3,6 +3,8 @@ package cue
 import (
 	"io"
 	"os"
+
+	"github.com/bitwizeshift/psx-decomp-tools/internal/ioerr"
 )
 
 // File is the parsed representation of a CUE sheet: the disc-level metadata
@@ -73,12 +75,12 @@ type Index struct {
 // FromFile reads and parses the CUE sheet at path. It returns the parsed [File],
 // or an error from opening the file or one of the parsing sentinels documented
 // on [FromReader].
-func FromFile(path string) (*File, error) {
+func FromFile(path string) (file *File, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer ioerr.CloseAndReport(f, &file, &err)
 	return FromReader(f)
 }
 
