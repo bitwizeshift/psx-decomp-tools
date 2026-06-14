@@ -18,34 +18,34 @@ func TestTypeString(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "Binary",
+			name:     "Binary",
 			fileType: cue.TypeBinary,
-			want: "BINARY",
+			want:     "BINARY",
 		},
 		{
-			name: "Motorola",
+			name:     "Motorola",
 			fileType: cue.TypeMotorola,
-			want: "MOTOROLA",
+			want:     "MOTOROLA",
 		},
 		{
-			name: "AIFF",
+			name:     "AIFF",
 			fileType: cue.TypeAIFF,
-			want: "AIFF",
+			want:     "AIFF",
 		},
 		{
-			name: "Wave",
+			name:     "Wave",
 			fileType: cue.TypeWave,
-			want: "WAVE",
+			want:     "WAVE",
 		},
 		{
-			name: "MP3",
+			name:     "MP3",
 			fileType: cue.TypeMP3,
-			want: "MP3",
+			want:     "MP3",
 		},
 		{
-			name: "Unknown",
+			name:     "Unknown",
 			fileType: cue.Type(99),
-			want: "Type(99)",
+			want:     "Type(99)",
 		},
 	}
 
@@ -75,14 +75,14 @@ func TestTypeMarshalText(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "Binary",
+			name:     "Binary",
 			fileType: cue.TypeBinary,
-			want: "BINARY",
+			want:     "BINARY",
 		},
 		{
-			name: "Wave",
+			name:     "Wave",
 			fileType: cue.TypeWave,
-			want: "WAVE",
+			want:     "WAVE",
 		},
 	}
 
@@ -146,9 +146,9 @@ func TestTypeUnmarshalText(t *testing.T) {
 			want: cue.TypeBinary,
 		},
 		{
-			name: "Invalid",
-			text: "NONSENSE",
-			want: cue.TypeBinary,
+			name:    "Invalid",
+			text:    "NONSENSE",
+			want:    cue.TypeBinary,
 			wantErr: cue.ErrInvalidType,
 		},
 	}

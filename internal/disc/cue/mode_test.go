@@ -176,9 +176,9 @@ func TestModeUnmarshalText(t *testing.T) {
 			want: cue.ModeMode2_2352,
 		},
 		{
-			name: "Invalid",
-			text: "NONSENSE",
-			want: cue.ModeAudio,
+			name:    "Invalid",
+			text:    "NONSENSE",
+			want:    cue.ModeAudio,
 			wantErr: cue.ErrInvalidMode,
 		},
 	}
