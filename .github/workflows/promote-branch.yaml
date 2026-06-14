@@ -21,10 +21,40 @@ jobs:
     name: Build and Test
     uses: ./.github/workflows/go-build-and-test.yaml
 
+  validate-commits:
+    name: Validate Commit Trailers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        # A default (shallow) checkout is sufficient: the commit range is
+        # resolved via the GitHub compare API, not local history.
+
+      - name: Validate promoted commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          repository: ${{ github.repository }}
+          sha: ${{ github.sha }}
+        run: |
+          # compare/<base>...<head> returns the commits in <head> that are not
+          # in <base> -- i.e. exactly the commits being promoted from master to
+          # this develop HEAD. Messages are emitted NUL-delimited so multi-line
+          # commit bodies are read back intact.
+          failed=0
+          while IFS= read -r -d '' message; do
+            printf '%s' "${message}" \
+              | scripts/validate-commit-trailers.sh --message-file - || failed=1
+          done < <(
+            gh api --paginate \
+              "repos/${repository}/compare/master...${sha}" \
+              --jq '.commits[].commit.message + "\u0000"'
+          )
+          exit "${failed}"
+
   promote:
     name: Promote to Master
     runs-on: ubuntu-latest
-    needs: build-and-test
+    needs: [build-and-test, validate-commits]
     if: success()
 
     environment:
