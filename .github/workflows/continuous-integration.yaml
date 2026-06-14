@@ -1,0 +1,28 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - "*"
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    uses: ./.github/workflows/go-build-and-test.yaml
+    permissions:
+      contents: read
+      id-token: write
+
+  lint:
+    name: Lint
+    uses: ./.github/workflows/go-lint.yaml
+    permissions:
+      contents: read
+
+  vulnerability-scanning:
+    name: Vulnerability Scanning
+    uses: ./.github/workflows/go-vulnerability-scanning.yaml
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
