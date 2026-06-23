@@ -17,6 +17,18 @@ indicating the estimated completeness of the information it contains.
 
 * [`TIM` Texture][tim]
 
+## Executable Formats
+
+* [`PS-X EXE` Executable][psexe]
+
+## Video Formats
+
+* [`STR` Streaming Movie][str]
+* [`MDEC` Bitstream][mdec]
+
 [cd]: <./archive/cd.md>
 [pac]: <./archive/pac.md>
 [tim]: <./image/tim.md>
+[psexe]: <./executable/psexe.md>
+[str]: <./video/str.md>
+[mdec]: <./video/mdec.md>

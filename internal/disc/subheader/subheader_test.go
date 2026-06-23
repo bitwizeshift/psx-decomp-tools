@@ -85,15 +85,22 @@ func TestSubheaderClassification(t *testing.T) {
 		submode      byte
 		wantForm2    bool
 		wantAudio    bool
+		wantVideo    bool
+		wantData     bool
 		wantRealTime bool
+		wantEOF      bool
 		wantDataSize int
 	}{
 		{
-			name:         "Form1Video",
+			name:         "Form1Filler",
 			submode:      0x00,
-			wantForm2:    false,
-			wantAudio:    false,
-			wantRealTime: false,
+			wantData:     true,
+			wantDataSize: 2048,
+		}, {
+			name:         "Form1RealTimeVideo",
+			submode:      0x48,
+			wantVideo:    true,
+			wantRealTime: true,
 			wantDataSize: 2048,
 		}, {
 			name:         "Form2AudioRealTime",
@@ -103,19 +110,24 @@ func TestSubheaderClassification(t *testing.T) {
 			wantRealTime: true,
 			wantDataSize: 2324,
 		}, {
+			name:         "Form2AudioEndOfFile",
+			submode:      0xe4,
+			wantForm2:    true,
+			wantAudio:    true,
+			wantRealTime: true,
+			wantEOF:      true,
+			wantDataSize: 2324,
+		}, {
+			name:         "Form1EndOfFile",
+			submode:      0x80,
+			wantData:     true,
+			wantEOF:      true,
+			wantDataSize: 2048,
+		}, {
 			name:         "Form2Data",
 			submode:      0x20,
 			wantForm2:    true,
-			wantAudio:    false,
-			wantRealTime: false,
 			wantDataSize: 2324,
-		}, {
-			name:         "Form1RealTimeVideo",
-			submode:      0x48,
-			wantForm2:    false,
-			wantAudio:    false,
-			wantRealTime: true,
-			wantDataSize: 2048,
 		},
 	}
 
@@ -131,7 +143,10 @@ func TestSubheaderClassification(t *testing.T) {
 			// Act
 			form2 := sut.Form2()
 			audio := sut.Audio()
+			video := sut.Video()
+			data := sut.Data()
 			realTime := sut.RealTime()
+			eof := sut.EndOfFile()
 			dataSize := sut.UserDataSize()
 
 			// Assert
@@ -141,8 +156,17 @@ func TestSubheaderClassification(t *testing.T) {
 			if got, want := audio, tc.wantAudio; !cmp.Equal(got, want) {
 				t.Errorf("Audio() = %v, want %v", got, want)
 			}
+			if got, want := video, tc.wantVideo; !cmp.Equal(got, want) {
+				t.Errorf("Video() = %v, want %v", got, want)
+			}
+			if got, want := data, tc.wantData; !cmp.Equal(got, want) {
+				t.Errorf("Data() = %v, want %v", got, want)
+			}
 			if got, want := realTime, tc.wantRealTime; !cmp.Equal(got, want) {
 				t.Errorf("RealTime() = %v, want %v", got, want)
+			}
+			if got, want := eof, tc.wantEOF; !cmp.Equal(got, want) {
+				t.Errorf("EndOfFile() = %v, want %v", got, want)
 			}
 			if got, want := dataSize, tc.wantDataSize; !cmp.Equal(got, want) {
 				t.Errorf("UserDataSize() = %d, want %d", got, want)
