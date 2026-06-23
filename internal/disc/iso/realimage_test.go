@@ -2,7 +2,6 @@ package iso_test
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"testing"
 
@@ -38,8 +37,15 @@ func (v *realImageVisitor) VisitVolumeDescriptor(d *iso.VolumeDescriptor) error 
 	return nil
 }
 
-func (v *realImageVisitor) VisitFile(f *iso.File) error {
-	data, _ := io.ReadAll(f.Data)
+func (v *realImageVisitor) VisitFile(f *iso.File, s *iso.FileStream) error {
+	var data []byte
+	listener := iso.ListenerFunc(func(chunk []byte, _ *iso.Subheader) error {
+		data = append(data, chunk...)
+		return nil
+	})
+	if err := s.Stream(listener); err != nil {
+		return err
+	}
 	v.files = append(v.files, fileData{Path: f.Path, Name: f.Name, Data: string(data)})
 	return nil
 }
@@ -55,7 +61,7 @@ func TestRealImageFiles(t *testing.T) {
 	sut := &realImageVisitor{}
 
 	// Act
-	if err := iso.New(bytes.NewReader(image)).Visit(sut); err != nil {
+	if err := iso.FromReaderAt(bytes.NewReader(image)).Visit(sut); err != nil {
 		t.Fatalf("Visit(...) = unexpected error %v", err)
 	}
 
@@ -80,7 +86,7 @@ func TestRealImagePrimaryDescriptor(t *testing.T) {
 	sut := &realImageVisitor{}
 
 	// Act
-	if err := iso.New(bytes.NewReader(image)).Visit(sut); err != nil {
+	if err := iso.FromReaderAt(bytes.NewReader(image)).Visit(sut); err != nil {
 		t.Fatalf("Visit(...) = unexpected error %v", err)
 	}
 

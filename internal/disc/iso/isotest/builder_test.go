@@ -3,7 +3,6 @@ package isotest_test
 import (
 	"bytes"
 	"errors"
-	"io"
 	"strconv"
 	"testing"
 
@@ -19,8 +18,15 @@ type collector struct {
 	files map[string]string
 }
 
-func (c *collector) VisitFile(f *iso.File) error {
-	data, _ := io.ReadAll(f.Data)
+func (c *collector) VisitFile(f *iso.File, s *iso.FileStream) error {
+	var data []byte
+	listener := iso.ListenerFunc(func(chunk []byte, _ *iso.Subheader) error {
+		data = append(data, chunk...)
+		return nil
+	})
+	if err := s.Stream(listener); err != nil {
+		return err
+	}
 	c.files[f.Path] = string(data)
 	return nil
 }
@@ -30,7 +36,7 @@ func (c *collector) VisitFile(f *iso.File) error {
 func extract(t *testing.T, image []byte) map[string]string {
 	t.Helper()
 	c := &collector{files: map[string]string{}}
-	if err := iso.New(bytes.NewReader(image)).Visit(c); err != nil {
+	if err := iso.FromReaderAt(bytes.NewReader(image)).Visit(c); err != nil {
 		t.Fatalf("Visit(...) = unexpected error %v", err)
 	}
 	return c.files
@@ -123,10 +129,15 @@ func TestBuilderTrailingBytes(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	plain := isotest.New().AddFile("/A.TXT", []byte("a")).Build()
+	plain := isotest.New(
+		isotest.File("/A.TXT", []byte("a")),
+	).Build()
 
 	// Act
-	withTrailing := isotest.New().AddFile("/A.TXT", []byte("a")).Trailing([]byte("LEFTOVER")).Build()
+	withTrailing := isotest.New(
+		isotest.File("/A.TXT", []byte("a")),
+		isotest.Trailing([]byte("LEFTOVER")),
+	).Build()
 
 	// Assert
 	if got, want := len(withTrailing), len(plain)+len("LEFTOVER"); !cmp.Equal(got, want) {
@@ -146,43 +157,57 @@ func TestBuilderCorruptions(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "ZeroBlockSize",
-			image:   isotest.New().AddFile("/A.TXT", []byte("a")).BuildZeroBlockSize(),
+			name: "ZeroBlockSize",
+			image: isotest.New(
+				isotest.File("/A.TXT", []byte("a")),
+			).BuildZeroBlockSize(),
 			wantErr: iso.ErrCorruptImage,
 		},
 		{
-			name:    "ShortDirectoryRecord",
-			image:   isotest.New().AddFile("/A.TXT", []byte("a")).BuildShortDirectoryRecord(),
+			name: "ShortDirectoryRecord",
+			image: isotest.New(
+				isotest.File("/A.TXT", []byte("a")),
+			).BuildShortDirectoryRecord(),
 			wantErr: iso.ErrCorruptImage,
 		},
 		{
-			name:    "OverlongIdentifier",
-			image:   isotest.New().AddFile("/A.TXT", []byte("a")).BuildOverlongIdentifier(),
+			name: "OverlongIdentifier",
+			image: isotest.New(
+				isotest.File("/A.TXT", []byte("a")),
+			).BuildOverlongIdentifier(),
 			wantErr: iso.ErrCorruptImage,
 		},
 		{
-			name:    "TruncatedPathTableRecord",
-			image:   isotest.New().AddFile("/A.TXT", []byte("a")).BuildTruncatedPathTableRecord(),
+			name: "TruncatedPathTableRecord",
+			image: isotest.New(
+				isotest.File("/A.TXT", []byte("a")),
+			).BuildTruncatedPathTableRecord(),
 			wantErr: iso.ErrTruncated,
 		},
 		{
-			name:    "ZeroPathTableRecord",
-			image:   isotest.New().AddFile("/A.TXT", []byte("a")).BuildZeroPathTableRecord(),
+			name: "ZeroPathTableRecord",
+			image: isotest.New(
+				isotest.File("/A.TXT", []byte("a")),
+			).BuildZeroPathTableRecord(),
 			wantErr: iso.ErrCorruptImage,
 		},
 		{
-			name:    "BadRootRecord",
-			image:   isotest.New().AddFile("/A.TXT", []byte("a")).BuildBadRootRecord(),
+			name: "BadRootRecord",
+			image: isotest.New(
+				isotest.File("/A.TXT", []byte("a")),
+			).BuildBadRootRecord(),
 			wantErr: iso.ErrCorruptImage,
 		},
 		{
-			name:    "PathTableBeyondEnd",
-			image:   isotest.New().AddFile("/A.TXT", []byte("a")).BuildPathTableBeyondEnd(),
+			name: "PathTableBeyondEnd",
+			image: isotest.New(
+				isotest.File("/A.TXT", []byte("a")),
+			).BuildPathTableBeyondEnd(),
 			wantErr: iso.ErrTruncated,
 		},
 		{
 			name:    "SubdirectoryBeyondEnd",
-			image:   isotest.New().AddDir("/DIR").BuildSubdirectoryBeyondEnd(),
+			image:   isotest.New(isotest.Dir("/DIR")).BuildSubdirectoryBeyondEnd(),
 			wantErr: iso.ErrTruncated,
 		},
 		{
@@ -197,7 +222,7 @@ func TestBuilderCorruptions(t *testing.T) {
 			t.Parallel()
 
 			// Arrange
-			sut := iso.New(bytes.NewReader(tc.image))
+			sut := iso.FromReaderAt(bytes.NewReader(tc.image))
 
 			// Act
 			err := sut.Visit(&collector{files: map[string]string{}})
@@ -220,14 +245,20 @@ func TestBuilderDuplicateExtents(t *testing.T) {
 		want  map[string]string
 	}{
 		{
-			name:  "DuplicateFileExtent",
-			image: isotest.New().AddFile("/A.TXT", []byte("aa")).AddFile("/B.TXT", []byte("bb")).BuildDuplicateFileExtent(),
-			want:  map[string]string{"/A.TXT": "bb"},
+			name: "DuplicateFileExtent",
+			image: isotest.New(
+				isotest.File("/A.TXT", []byte("aa")),
+				isotest.File("/B.TXT", []byte("bb")),
+			).BuildDuplicateFileExtent(),
+			want: map[string]string{"/A.TXT": "bb"},
 		},
 		{
-			name:  "DuplicateDirectoryExtent",
-			image: isotest.New().AddDir("/ONE").AddDir("/TWO").BuildDuplicateDirectoryExtent(),
-			want:  map[string]string{},
+			name: "DuplicateDirectoryExtent",
+			image: isotest.New(
+				isotest.Dir("/ONE"),
+				isotest.Dir("/TWO"),
+			).BuildDuplicateDirectoryExtent(),
+			want: map[string]string{},
 		},
 	}
 
@@ -258,12 +289,11 @@ func TestErrorReaderAt(t *testing.T) {
 	n, err := sut.ReadAt(buf, 0)
 
 	// Assert
+	if got, want := err, sentinel; !cmp.Equal(got, want, cmpopts.EquateErrors()) {
+		t.Fatalf("ReadAt(...) = error %v, want %v", got, want)
+	}
 	if got, want := n, 0; !cmp.Equal(got, want) {
 		t.Errorf("ReadAt(...) = %d bytes, want %d", got, want)
-	}
-	opts := cmpopts.EquateErrors()
-	if got, want := err, sentinel; !cmp.Equal(got, want, opts) {
-		t.Errorf("ReadAt(...) = error %v, want %v", got, want)
 	}
 }
 
@@ -314,12 +344,11 @@ func TestTailErrorReaderAt(t *testing.T) {
 			n, err := sut.ReadAt(buf, tc.offset)
 
 			// Assert
+			if got, want := err, tc.wantErr; !cmp.Equal(got, want, cmpopts.EquateErrors()) {
+				t.Fatalf("ReadAt(...) = error %v, want %v", got, want)
+			}
 			if got, want := string(buf[:n]), tc.wantData; !cmp.Equal(got, want) {
 				t.Errorf("ReadAt(...) = data %q, want %q", got, want)
-			}
-			opts := cmpopts.EquateErrors()
-			if got, want := err, tc.wantErr; !cmp.Equal(got, want, opts) {
-				t.Errorf("ReadAt(...) = error %v, want %v", got, want)
 			}
 		})
 	}

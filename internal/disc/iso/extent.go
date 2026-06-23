@@ -33,8 +33,23 @@ type Region struct {
 	Data io.Reader
 }
 
-// File is a file declared by a directory record, together with a reader over its
-// contents.
+// Unexpected is the trailing bytes of a sector, beyond its ISO logical block,
+// that belong to no file stream: the slack of the reserved system area, the tail
+// of a Form 2 descriptor or record sector, or the opaque remainder of a bare
+// layout. It is reported so that no on-disc byte is dropped.
+type Unexpected struct {
+	// Block is the logical sector the bytes belong to.
+	Block int64
+
+	// Length is the number of bytes.
+	Length int64
+
+	// Data streams the bytes.
+	Data io.Reader
+}
+
+// File is the metadata of a file declared by a directory record. It is plain
+// data; its contents are read through the [FileStream] reported alongside it.
 type File struct {
 	// Path is the file's absolute path from the root directory, using cleaned
 	// names and "/" separators, such as "/SYSTEM.CNF".
@@ -46,9 +61,7 @@ type File struct {
 	// Record is the directory record that declared the file.
 	Record *DirectoryRecord
 
-	// Extent locates the file's data within the image.
+	// Extent locates the file's cooked extent (its 2048-byte logical blocks)
+	// within the image.
 	Extent Extent
-
-	// Data streams the file's contents in order, read incrementally.
-	Data io.Reader
 }

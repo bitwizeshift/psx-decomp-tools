@@ -58,8 +58,14 @@ func (r *recorder) VisitDirectoryRecord(rec *iso.DirectoryRecord) error {
 	return nil
 }
 
-func (r *recorder) VisitFile(f *iso.File) error {
-	data, _ := io.ReadAll(f.Data)
+func (r *recorder) VisitFile(f *iso.File, s *iso.FileStream) error {
+	var data []byte
+	if err := s.Stream(iso.ListenerFunc(func(chunk []byte, _ *iso.Subheader) error {
+		data = append(data, chunk...)
+		return nil
+	})); err != nil {
+		return err
+	}
 	r.events = append(r.events, visitEvent{Kind: "file", Name: f.Name, Path: f.Path, Offset: f.Extent.Offset, Length: f.Extent.Length, Block: f.Extent.Block, Data: string(data)})
 	return nil
 }
@@ -70,12 +76,18 @@ func (r *recorder) VisitUnreferenced(region *iso.Region) error {
 	return nil
 }
 
+func (r *recorder) VisitUnexpected(u *iso.Unexpected) error {
+	data, _ := io.ReadAll(u.Data)
+	r.events = append(r.events, visitEvent{Kind: "unexpected", Length: u.Length, Block: u.Block, Data: string(data)})
+	return nil
+}
+
 // recordVisit visits image and returns the recorded events, failing the test on
 // any visit error.
 func recordVisit(t *testing.T, image []byte) []visitEvent {
 	t.Helper()
 	r := &recorder{}
-	if err := iso.New(bytes.NewReader(image)).Visit(r); err != nil {
+	if err := iso.FromReaderAt(bytes.NewReader(image)).Visit(r); err != nil {
 		t.Fatalf("Visit(...) = unexpected error %v", err)
 	}
 	return r.events
@@ -352,7 +364,7 @@ func TestReaderVisitErrors(t *testing.T) {
 			t.Parallel()
 
 			// Arrange
-			sut := iso.New(tc.reader)
+			sut := iso.FromReaderAt(tc.reader)
 
 			// Act
 			err := sut.Visit(&recorder{})
@@ -452,7 +464,7 @@ func TestReaderVisitAbort(t *testing.T) {
 
 			// Arrange
 			image := isotest.New().AddFile("/A.TXT", []byte("x")).Build()
-			sut := iso.New(bytes.NewReader(image))
+			sut := iso.FromReaderAt(bytes.NewReader(image))
 
 			// Act
 			err := sut.Visit(tc.visitor)
@@ -486,11 +498,14 @@ func (a *abortVisitor) VisitPathTableRecord(*iso.PathTableRecord) error {
 func (a *abortVisitor) VisitDirectoryRecord(*iso.DirectoryRecord) error {
 	return a.fail("dir")
 }
-func (a *abortVisitor) VisitFile(*iso.File) error {
+func (a *abortVisitor) VisitFile(*iso.File, *iso.FileStream) error {
 	return a.fail("file")
 }
 func (a *abortVisitor) VisitUnreferenced(*iso.Region) error {
 	return a.fail("gap")
+}
+func (a *abortVisitor) VisitUnexpected(*iso.Unexpected) error {
+	return a.fail("unexpected")
 }
 
 // fail returns the visitor's error when kind matches the callback it is set to

@@ -7,9 +7,11 @@ import (
 	"testing"
 
 	"github.com/bitwizeshift/psx-decomp-tools/internal/disc"
+	"github.com/bitwizeshift/psx-decomp-tools/internal/disc/cue"
 	"github.com/bitwizeshift/psx-decomp-tools/internal/disc/disctest"
 	"github.com/bitwizeshift/psx-decomp-tools/internal/disc/iso"
 	"github.com/bitwizeshift/psx-decomp-tools/internal/disc/track"
+	"github.com/bitwizeshift/psx-decomp-tools/internal/disc/track/tracktest"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -17,6 +19,22 @@ import (
 // sectorBytes returns a 2048-byte sector filled with value.
 func sectorBytes(value byte) []byte {
 	return bytes.Repeat([]byte{value}, 2048)
+}
+
+// concat returns the concatenation of a and b in a fresh slice.
+func concat(a, b []byte) []byte {
+	return append(append([]byte{}, a...), b...)
+}
+
+// modeVolume builds a single-track disc of the given mode backed by raw and
+// returns its volume.
+func modeVolume(mode cue.Mode, raw []byte) iso.SectorSource {
+	cueText := lines(
+		`FILE "track.bin" BINARY`,
+		`  TRACK 01 `+mode.String(),
+		`    INDEX 01 00:00:00`,
+	)
+	return mustVolume(disctest.MustDisc(cueText, map[string][]byte{"track.bin": raw}))
 }
 
 // twoTrackDisc builds a two-track disc whose tracks each hold two distinct
@@ -31,8 +49,8 @@ func twoTrackDisc() *disc.Disc {
 		`    INDEX 01 00:00:00`,
 	)
 	files := map[string][]byte{
-		"a.bin": append(sectorBytes(0xA1), sectorBytes(0xA2)...),
-		"b.bin": append(sectorBytes(0xB1), sectorBytes(0xB2)...),
+		"a.bin": concat(sectorBytes(0xA1), sectorBytes(0xA2)),
+		"b.bin": concat(sectorBytes(0xB1), sectorBytes(0xB2)),
 	}
 	return disctest.MustDisc(cueText, files)
 }
@@ -60,54 +78,76 @@ func mustVolume(d *disc.Disc) iso.SectorSource {
 func TestVolumeReadSector(t *testing.T) {
 	t.Parallel()
 
+	block := bytes.Repeat([]byte{0x11}, 2048)
+	form2Tail := bytes.Repeat([]byte{0x22}, 276)
+	audioTail := bytes.Repeat([]byte{0x33}, 304)
+	bareTail := bytes.Repeat([]byte{0x44}, 288)
+	msf := cue.MSF{Minute: 0, Second: 2, Frame: 0}
+	form1Raw := tracktest.BuildMode2Form1Sector(track.Subheader{File: 1, Channel: 2, SubMode: track.SubModeData, Coding: 3}, msf, block)
+	form2Raw := tracktest.BuildMode2Form2Sector(track.Subheader{File: 1, Channel: 2, Coding: 3}, msf, concat(block, form2Tail))
+
 	testCases := []struct {
-		name     string
-		source   iso.SectorSource
-		sector   int
-		wantData []byte
-		wantErr  error
+		name    string
+		source  iso.SectorSource
+		sector  int
+		want    iso.Sector
+		wantErr error
 	}{
 		{
-			name:     "FirstTrackFirstSector",
-			source:   mustVolume(twoTrackDisc()),
-			sector:   0,
-			wantData: sectorBytes(0xA1),
-			wantErr:  nil,
+			name:    "Mode1Bare",
+			source:  modeVolume(cue.ModeMode1_2048, block),
+			sector:  0,
+			want:    iso.Sector{Index: 0, Block: block},
+			wantErr: nil,
 		},
 		{
-			name:     "FirstTrackSecondSector",
-			source:   mustVolume(twoTrackDisc()),
-			sector:   1,
-			wantData: sectorBytes(0xA2),
-			wantErr:  nil,
+			name:    "Mode2Form1",
+			source:  modeVolume(cue.ModeMode2_2352, form1Raw),
+			sector:  0,
+			want:    iso.Sector{Index: 0, Block: block, Subheader: &iso.Subheader{File: 1, Channel: 2, SubMode: track.SubModeData, Coding: 3}},
+			wantErr: nil,
 		},
 		{
-			name:     "SecondTrackAcrossBoundary",
-			source:   mustVolume(twoTrackDisc()),
-			sector:   2,
-			wantData: sectorBytes(0xB1),
-			wantErr:  nil,
+			name:    "Mode2Form2Stream",
+			source:  modeVolume(cue.ModeMode2_2352, form2Raw),
+			sector:  0,
+			want:    iso.Sector{Index: 0, Block: block, Tail: form2Tail, TailIsStream: true, Subheader: &iso.Subheader{File: 1, Channel: 2, SubMode: track.SubModeForm2, Coding: 3}},
+			wantErr: nil,
 		},
 		{
-			name:     "SecondTrackLastSector",
-			source:   mustVolume(twoTrackDisc()),
-			sector:   3,
-			wantData: sectorBytes(0xB2),
-			wantErr:  nil,
+			name:    "AudioStream",
+			source:  modeVolume(cue.ModeAudio, concat(block, audioTail)),
+			sector:  0,
+			want:    iso.Sector{Index: 0, Block: block, Tail: audioTail, TailIsStream: true},
+			wantErr: nil,
 		},
 		{
-			name:     "PastEnd",
-			source:   mustVolume(twoTrackDisc()),
-			sector:   4,
-			wantData: nil,
-			wantErr:  io.EOF,
+			name:    "BareMode2NonStream",
+			source:  modeVolume(cue.ModeMode2_2336, concat(block, bareTail)),
+			sector:  0,
+			want:    iso.Sector{Index: 0, Block: block, Tail: bareTail},
+			wantErr: nil,
 		},
 		{
-			name:     "DecodeError",
-			source:   mustVolume(corruptDisc()),
-			sector:   0,
-			wantData: nil,
-			wantErr:  track.ErrBadSync,
+			name:    "AcrossTrackBoundary",
+			source:  mustVolume(twoTrackDisc()),
+			sector:  2,
+			want:    iso.Sector{Index: 2, Block: sectorBytes(0xB1)},
+			wantErr: nil,
+		},
+		{
+			name:    "PastEnd",
+			source:  mustVolume(twoTrackDisc()),
+			sector:  4,
+			want:    iso.Sector{},
+			wantErr: io.EOF,
+		},
+		{
+			name:    "DecodeError",
+			source:  mustVolume(corruptDisc()),
+			sector:  0,
+			want:    iso.Sector{},
+			wantErr: track.ErrBadSync,
 		},
 	}
 
@@ -119,10 +159,10 @@ func TestVolumeReadSector(t *testing.T) {
 			sut := tc.source
 
 			// Act
-			data, err := sut.ReadSector(tc.sector)
+			sector, err := sut.ReadSector(tc.sector)
 
 			// Assert
-			if got, want := data, tc.wantData; !cmp.Equal(got, want) {
+			if got, want := sector, tc.want; !cmp.Equal(got, want) {
 				t.Errorf("volume.ReadSector(%d) = mismatch (-want +got):\n%s", tc.sector, cmp.Diff(want, got))
 			}
 			opts := cmpopts.EquateErrors()

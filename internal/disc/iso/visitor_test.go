@@ -33,11 +33,15 @@ func TestBaseVisitor(t *testing.T) {
 		},
 		{
 			name: "File",
-			call: func(v iso.Visitor) error { return v.VisitFile(&iso.File{}) },
+			call: func(v iso.Visitor) error { return v.VisitFile(&iso.File{}, &iso.FileStream{}) },
 		},
 		{
 			name: "Unreferenced",
 			call: func(v iso.Visitor) error { return v.VisitUnreferenced(&iso.Region{}) },
+		},
+		{
+			name: "Unexpected",
+			call: func(v iso.Visitor) error { return v.VisitUnexpected(&iso.Unexpected{}) },
 		},
 	}
 
@@ -52,8 +56,7 @@ func TestBaseVisitor(t *testing.T) {
 			err := tc.call(sut)
 
 			// Assert
-			opts := cmpopts.EquateErrors()
-			if got, want := err, error(nil); !cmp.Equal(got, want, opts) {
+			if got, want := err, error(nil); !cmp.Equal(got, want, cmpopts.EquateErrors()) {
 				t.Errorf("BaseVisitor.Visit%s(...) = error %v, want %v", tc.name, got, want)
 			}
 		})

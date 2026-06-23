@@ -1,11 +1,36 @@
 package subheader_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/bitwizeshift/psx-decomp-tools/internal/disc/subheader"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
+
+func TestRead(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	data := []byte{0x00, 0x01, 0x64, 0x01, 0x00, 0x02, 0x00, 0x00}
+	reader := bytes.NewReader(data)
+
+	// Act
+	got, err := subheader.Read(reader)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	want := []subheader.Subheader{
+		{File: 0x00, Channel: 0x01, SubMode: 0x64, Coding: 0x01},
+		{File: 0x00, Channel: 0x02, SubMode: 0x00, Coding: 0x00},
+	}
+	if got, want := got, want; !cmp.Equal(got, want, cmpopts.EquateEmpty()) {
+		t.Errorf("Read() diff (-got +want):\n%s", cmp.Diff(got, want, cmpopts.EquateEmpty()))
+	}
+}
 
 func TestParse(t *testing.T) {
 	t.Parallel()

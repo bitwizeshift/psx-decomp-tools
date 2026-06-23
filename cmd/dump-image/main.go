@@ -1,8 +1,10 @@
 // Command dump-image reads the CUE sheet named on the command line and extracts
 // the ISO 9660 volume that spans its tracks into the directory named by --output.
-// Files are written under iso/, the bytes of the system area and each descriptor
-// and record under regions/, and any non-zero unreferenced byte range under
-// unreferenced/.
+// Files are written under iso/ as their raw, form-aware user data (with a
+// .xa subheader sidecar for XA files), the bytes of the system area and each
+// descriptor and record under regions/, non-zero unreferenced ranges under
+// unreferenced/, and the trailing bytes of sectors belonging to no file under
+// unexpected/.
 package main
 
 import (
@@ -50,12 +52,13 @@ func run(path, output string) (err error) {
 		return err
 	}
 	reader := iso.SectorReader{Source: source}
-	return iso.New(reader).Visit(&extractVisitor{reader: reader, root: output, index: map[string]int{}})
+	return iso.FromSectorSource(source).Visit(&extractVisitor{reader: reader, root: output, index: map[string]int{}})
 }
 
-// extractVisitor writes the parts of an ISO 9660 image beneath root: files under
-// iso/, the system area and each descriptor and record under regions/, and each
-// non-zero unreferenced range under unreferenced/.
+// extractVisitor writes the parts of an ISO 9660 image beneath root: raw
+// files under iso/, the system area and each descriptor and record under regions/,
+// each non-zero unreferenced range under unreferenced/, and each non-file sector
+// tail under unexpected/.
 type extractVisitor struct {
 	iso.BaseVisitor
 	reader io.ReaderAt
@@ -100,10 +103,25 @@ func (v *extractVisitor) VisitUnreferenced(r *iso.Region) error {
 	return v.writeBytes("unreferenced", fmt.Sprintf("%d.bin", v.next("unreferenced")), data)
 }
 
-// VisitFile writes the file's contents to its path beneath iso/, creating any
-// parent directories. It returns any error from creating the directories, writing
-// the file, or reading the file's data.
-func (v *extractVisitor) VisitFile(f *iso.File) (err error) {
+// VisitUnexpected writes a sector's trailing bytes, beyond its ISO logical block
+// and belonging to no file, into unexpected/ named by the sector's logical block,
+// unless every byte is zero.
+func (v *extractVisitor) VisitUnexpected(u *iso.Unexpected) error {
+	data, err := io.ReadAll(u.Data)
+	if err != nil {
+		return err
+	}
+	if allZero(data) {
+		return nil
+	}
+	return v.writeBytes("unexpected", fmt.Sprintf("%d.bin", u.Block), data)
+}
+
+// VisitFile writes the file's raw contents to its path beneath iso/, creating
+// any parent directories, and writes a per-sector XA subheader sidecar (.xa) when
+// the file carries any. It returns any error from creating the directories,
+// writing, or reading the file's sectors.
+func (v *extractVisitor) VisitFile(f *iso.File, s *iso.FileStream) (err error) {
 	rel := filepath.Join("iso", filepath.FromSlash(f.Path))
 	dest := filepath.Join(v.root, rel)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -118,16 +136,43 @@ func (v *extractVisitor) VisitFile(f *iso.File) (err error) {
 			err = cerr
 		}
 	}()
-	written, err := io.Copy(out, f.Data)
-	if err != nil {
+	var written int64
+	var subheaders []*iso.Subheader
+	xa := false
+	listener := iso.ListenerFunc(func(data []byte, sub *iso.Subheader) error {
+		n, err := out.Write(data)
+		written += int64(n)
+		if err != nil {
+			return err
+		}
+		subheaders = append(subheaders, sub)
+		xa = xa || sub != nil
+		return nil
+	})
+	if err := s.Stream(listener); err != nil {
 		return err
 	}
-	if written < f.Extent.Length {
-		log.Printf("  extracted %s (%d of %d bytes; extent runs past the end of the image)", rel, written, f.Extent.Length)
-		return nil
+	if xa {
+		if err := os.WriteFile(dest+".xa", encodeSubheaders(subheaders), 0o644); err != nil {
+			return err
+		}
 	}
 	log.Printf("  extracted %s (%d bytes)", rel, written)
 	return nil
+}
+
+// encodeSubheaders packs each sector's File, Channel, SubMode, and Coding bytes
+// (zeros where a sector has no subheader) into a compact sidecar.
+func encodeSubheaders(subheaders []*iso.Subheader) []byte {
+	buf := make([]byte, 0, len(subheaders)*4)
+	for _, sub := range subheaders {
+		if sub == nil {
+			buf = append(buf, 0, 0, 0, 0)
+			continue
+		}
+		buf = append(buf, sub.File, sub.Channel, sub.SubMode, sub.Coding)
+	}
+	return buf
 }
 
 // writeRegion reads the bytes of extent from the image and writes them into

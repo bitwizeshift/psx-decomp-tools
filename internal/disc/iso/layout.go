@@ -11,7 +11,7 @@ import (
 // [Visitor]. The visit closure captures the parsed value the callback needs.
 type segment struct {
 	extent Extent
-	visit  func(rd *Reader, v Visitor) error
+	visit  func(i *ISO, v Visitor) error
 }
 
 // builder discovers the claimed segments of an image by parsing its volume
@@ -20,20 +20,25 @@ type builder struct {
 	r         io.ReaderAt
 	blockSize int64
 	segments  []segment
+	files     []fileRange
 	walked    map[int64]bool
 }
 
-// layout returns the image's claimed segments in ascending offset order. It
-// returns any error encountered while parsing the image structure.
-func (rd *Reader) layout() ([]segment, error) {
-	b := builder{r: rd.r, walked: map[int64]bool{}}
+// layout returns the image's claimed segments in ascending offset order and its
+// files' sector ranges in ascending order. It returns any error encountered while
+// parsing the image structure.
+func (i *ISO) layout() ([]segment, []fileRange, error) {
+	b := builder{r: i.cooked, walked: map[int64]bool{}}
 	if err := b.scan(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sort.Slice(b.segments, func(lhs, rhs int) bool {
 		return b.segments[lhs].extent.Offset < b.segments[rhs].extent.Offset
 	})
-	return b.segments, nil
+	sort.Slice(b.files, func(lhs, rhs int) bool {
+		return b.files[lhs].start < b.files[rhs].start
+	})
+	return b.segments, b.files, nil
 }
 
 // scan claims the system area, the volume descriptor set, and then, from the
@@ -55,7 +60,7 @@ func (b *builder) scan() error {
 // set.
 func (b *builder) claimSystemArea() {
 	extent := Extent{Offset: 0, Length: systemAreaSectors * logicalSectorSize, Block: 0}
-	b.add(extent, func(rd *Reader, v Visitor) error {
+	b.add(extent, func(rd *ISO, v Visitor) error {
 		return v.VisitSystemArea(rd.region(extent))
 	})
 }
@@ -76,7 +81,7 @@ func (b *builder) scanDescriptors() (*PrimaryVolumeDescriptor, error) {
 			return nil, err
 		}
 		claimed := descriptor
-		b.add(descriptor.Extent, func(_ *Reader, v Visitor) error {
+		b.add(descriptor.Extent, func(_ *ISO, v Visitor) error {
 			return v.VisitVolumeDescriptor(&claimed)
 		})
 		if descriptor.Primary != nil {
@@ -132,7 +137,7 @@ func (b *builder) scanPathTable(block uint32, size int, order binary.ByteOrder) 
 			return ErrCorruptImage
 		}
 		claimed := record
-		b.add(record.Extent, func(_ *Reader, v Visitor) error {
+		b.add(record.Extent, func(_ *ISO, v Visitor) error {
 			return v.VisitPathTableRecord(&claimed)
 		})
 		pos += n
@@ -174,7 +179,7 @@ func (b *builder) scanDirectoryBlock(block []byte, base int64, path string) erro
 			break
 		}
 		claimed := record
-		b.add(record.Extent, func(_ *Reader, v Visitor) error {
+		b.add(record.Extent, func(_ *ISO, v Visitor) error {
 			return v.VisitDirectoryRecord(&claimed)
 		})
 		if err := b.descend(&claimed, path); err != nil {
@@ -199,27 +204,31 @@ func (b *builder) descend(record *DirectoryRecord, path string) error {
 }
 
 // claimFile claims the data extent of the file declared by record, qualified by
-// path. Empty files and already-walked extents are not claimed.
+// path, and records its sector range. Empty files and already-walked extents are
+// not claimed.
 func (b *builder) claimFile(record *DirectoryRecord, path string) {
 	offset := int64(record.DataBlock) * b.blockSize
 	if record.DataLength == 0 || b.walked[offset] {
 		return
 	}
 	b.walked[offset] = true
+	start := int(record.DataBlock)
+	end := start + int((int64(record.DataLength)+b.blockSize-1)/b.blockSize)
+	b.files = append(b.files, fileRange{start: start, end: end})
 	file := File{
 		Path:   path + record.Name,
 		Name:   record.Name,
 		Record: record,
 		Extent: Extent{Offset: offset, Length: int64(record.DataLength), Block: int64(record.DataBlock)},
 	}
-	b.add(file.Extent, func(rd *Reader, v Visitor) error {
-		file.Data = io.NewSectionReader(rd.r, file.Extent.Offset, file.Extent.Length)
-		return v.VisitFile(&file)
+	b.add(file.Extent, func(i *ISO, v Visitor) error {
+		stream := FileStream{source: i.sectors, start: start, end: end, length: int64(record.DataLength)}
+		return v.VisitFile(&file, &stream)
 	})
 }
 
 // add appends a claimed segment over extent with the given visit action.
-func (b *builder) add(extent Extent, visit func(rd *Reader, v Visitor) error) {
+func (b *builder) add(extent Extent, visit func(rd *ISO, v Visitor) error) {
 	b.segments = append(b.segments, segment{extent: extent, visit: visit})
 }
 

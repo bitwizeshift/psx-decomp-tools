@@ -48,9 +48,42 @@ type Builder struct {
 	endSector uint32
 }
 
+type Option interface {
+	apply(*Builder)
+}
+
+func File(path string, data []byte) Option {
+	return file{Path: path, Data: data}
+}
+
+type file struct {
+	Path string
+	Data []byte
+}
+
+func (f file) apply(b *Builder) {
+	b.AddFile(f.Path, f.Data)
+}
+
+type Dir string
+
+func (f Dir) apply(b *Builder) {
+	b.AddDir(string(f))
+}
+
+type Trailing []byte
+
+func (t Trailing) apply(b *Builder) {
+	b.Trailing([]byte(t))
+}
+
 // New returns a [Builder] whose tree contains only the root directory.
-func New() *Builder {
-	return &Builder{root: &node{name: "", isDir: true}}
+func New(opts ...Option) *Builder {
+	builder := &Builder{root: &node{name: "", isDir: true}}
+	for _, opt := range opts {
+		opt.apply(builder)
+	}
+	return builder
 }
 
 // AddFile adds a file at the given absolute path with the given contents,
