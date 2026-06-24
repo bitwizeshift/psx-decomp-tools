@@ -2,7 +2,7 @@
 
 ![badge]
 
-[badge]: <https://img.shields.io/badge/decoded-~90%25-orange.svg> "90% reverse engineered"
+[badge]: <https://img.shields.io/badge/decoded-~90%25-green.svg> "90% reverse engineered"
 
 `TIM` is the standard PlayStation texture image. It pairs an optional color
 lookup table (CLUT) with a block of packed pixels laid out for upload into the
