@@ -27,11 +27,11 @@ const (
 	clutFlag = 0x08
 )
 
-// timMagic is the four little-endian bytes of the id word that begin every TIM.
-var timMagic = []byte{timID, 0x00, 0x00, 0x00}
+// Magic is the four little-endian bytes of the id word that begin every TIM.
+var Magic = []byte{timID, 0x00, 0x00, 0x00}
 
 func init() {
-	image.RegisterFormat("tim", string(timMagic), Decode, DecodeConfig)
+	image.RegisterFormat("tim", string(Magic), Decode, DecodeConfig)
 }
 
 // File is a decoded TIM image: its pixel mode, framebuffer placement, decoded
@@ -123,7 +123,7 @@ func DecodeAll(data []byte) ([]Located, error) {
 	}
 
 	var located []Located
-	for bytes.HasPrefix(data[offset:], timMagic) {
+	for bytes.HasPrefix(data[offset:], Magic) {
 		file, err := Parse(bytes.NewReader(data[offset:]))
 		if err != nil {
 			return located, err
